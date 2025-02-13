@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SDG 11.2.1 ver.05</title>
+    <link href="maplibre/maplibre-gl.css" rel="stylesheet"/>
+    <style>
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .disp-layers{
+            background-color: #ffffff;
+            margin: 3px;
+        }
+        .disp-attributes{
+            background-color: #ffffff;
+            margin: 3px;
+        }
+        #zoom-level {
+            position: absolute;
+            top: 10px;
+            right: 50px;
+            background-color: white;
+            padding: 5px;
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+    </style>
+
+
+
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script>
+
+
+
+</head>
+<body>
+    <div id="map"></div>
+    <div id="controls">
+        <div class="disp-layers">
+            <label>
+                <input type="checkbox" id="osm-layer-chk" checked>
+                Open Street Map
+            </label>
+            <br>
+            <label>
+                <input type="checkbox" id="population-all-fill-layer-chk" checked>
+                Population2020
+            </label>
+            <br>
+            <label>
+                <input type="checkbox" id="PublicTransport-points-layer-chk" checked>
+                バス停・フェリー乗り場
+            </label>
+            <br>
+            <label>
+                <input type="checkbox" id="MicroletRoute-line-layer-chk" checked>
+                MicroletRoute
+            </label>
+            <br>
+            <label>
+                <input type="checkbox" id="outline-layer-chk" >
+                境界線
+            </label>
+            <br>
+        </div>
+        <div class="disp-attributes">
+            <label>属性情報</label>
+            <div id="attributes"></div>
+        </div>
+    </div>
+    <div id="zoom-level">Zoom: 12</div> 
+    <script src="maplibre/maplibre-gl.js"></script>
+    <script src="pmtiles/pmtiles.js"></script>
+    <script>
+        const protocol = new pmtiles.Protocol();
+        maplibregl.addProtocol('pmtiles', protocol.tile);
+
+        const layerIds = [
+           'osm-layer', 
+           'PublicTransport-points-layer', 'MicroletRoute-line-layer'
+        ];
+        
+        // 統合された塗りつぶしレイヤーのチェックボックスの処理
+        document.querySelector('#population-all-fill-layer-chk').addEventListener('change', () => {
+           const isChecked = document.getElementById('population-all-fill-layer-chk').checked;
+           const fillLayerIds = ['population-fill-layer', 'population-outline-layer'];
+           fillLayerIds.forEach(id => {
+               if (isChecked) {
+                   map.setLayoutProperty(id, 'visibility', 'visible');
+               } else {
+                   map.setLayoutProperty(id, 'visibility', 'none');
+               }
+           });
+        });
+
+       // outline-layer のチェックボックスの処理
+        document.querySelector('#outline-layer-chk').addEventListener('change', () => {
+            const isChecked = document.getElementById('outline-layer-chk').checked;
+            const outlineLayerIds = ['MUNICIPIO-outline-layer', 'PostuAdministrativo-outline-layer', 'Suco-outline-layer'];
+            outlineLayerIds.forEach(id => {
+                if (isChecked) {
+                    map.setLayoutProperty(id, 'visibility', 'visible');
+                } else {
+                    map.setLayoutProperty(id, 'visibility', 'none');
+                }
+            });
+        });
+
+
+
+        const map = new maplibregl.Map({
+            container: 'map',
+            style: {
+                version: 8,
+                sources: {
+                    'osm-tiles': {
+                        type: 'raster',
+                        tiles: [
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+                        ],
+                        tileSize: 256,
+                        attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> '
+                    }
+                },
+                layers: [
+                    {
+                        id: 'osm-layer',
+                        type: 'raster',
+                        source: 'osm-tiles',
+                        minzoom: 0,
+                        maxzoom: 19,
+                        paint: {
+                            'raster-saturation': -0.5, // 彩度を減らしてグレースケールに
+                        }
+
+                    }
+                ]
+            },
+            center: [125.5736, -8.5568],
+            zoom: 10
+        });
+
+        const toggleLayer = (id) => {
+            const isChecked = document.getElementById(`${id}-chk`).checked;
+            if (isChecked) {
+                map.setLayoutProperty(id, 'visibility', 'visible');
+            } else {
+                map.setLayoutProperty(id, 'visibility', 'none');
+            }
+        }
+
+        layerIds.forEach(lyrId => {
+            document.querySelector(`#${lyrId}-chk`).addEventListener('change', () => {
+                toggleLayer(lyrId);
+            });
+        });
+
+        map.addControl(new maplibregl.NavigationControl());
+
+        map.on('load', () => {
+
+
+            map.addSource('population-source', {
+                type: 'vector',
+                tiles: [
+                    'pmtiles://https://hfu.github.io/worldpop-h3/pop.pmtiles/{z}/{x}/{y}'
+                ],
+                minzoom: 4,
+                maxzoom: 14
+            });
+
+
+            // 塗りつぶし用のレイヤーを追加
+            map.addLayer({
+                id: 'population-fill-layer',
+                type: 'fill',
+                source: 'population-source',
+                'source-layer': 'pop', // データ内のレイヤー名を指定
+                paint: {
+               'fill-color': [
+                    'step',
+                   ['zoom'],
+                   [
+                     'case',
+                        ['<=', ['get', '2020'], 2401], '#ffffff', // 白色
+                        ['<=', ['get', '2020'], 4802], '#ffe3e3', 
+                        ['<=', ['get', '2020'], 9604], '#ffc6c6', 
+                        ['<=', ['get', '2020'], 19208], '#ffaaaa', 
+                        ['<=', ['get', '2020'], 38416], '#ff8e8e', 
+                        ['<=', ['get', '2020'], 76832], '#ff7171', 
+                        ['<=', ['get', '2020'], 153664], '#ff5555', 
+                        ['<=', ['get', '2020'], 307328], '#ff3939', 
+                        ['<=', ['get', '2020'], 614656], '#ff1c1c', 
+                        '#ff0000' 
+
+                    ],
+               8, [
+                    'case',
+                        ['<=', ['get', '2020'], 343], '#ffffff', // 白色
+                        ['<=', ['get', '2020'], 686], '#ffe3e3', 
+                        ['<=', ['get', '2020'], 1372], '#ffc6c6', 
+                        ['<=', ['get', '2020'], 2744], '#ffaaaa', 
+                        ['<=', ['get', '2020'], 5488], '#ff8e8e', 
+                        ['<=', ['get', '2020'], 10976], '#ff7171', 
+                        ['<=', ['get', '2020'], 21952], '#ff5555', 
+                        ['<=', ['get', '2020'], 43904], '#ff3939', 
+                        ['<=', ['get', '2020'], 87808], '#ff1c1c', 
+                        '#ff0000'                     
+                    ],
+               10, [
+                    'case',
+                        ['<=', ['get', '2020'], 49], '#ffffff', // 白色
+                        ['<=', ['get', '2020'], 98], '#ffe3e3', 
+                        ['<=', ['get', '2020'], 196], '#ffc6c6', 
+                        ['<=', ['get', '2020'], 392], '#ffaaaa', 
+                        ['<=', ['get', '2020'], 784], '#ff8e8e', 
+                        ['<=', ['get', '2020'], 1568], '#ff7171', 
+                        ['<=', ['get', '2020'], 3136], '#ff5555', 
+                        ['<=', ['get', '2020'], 6272], '#ff3939', 
+                        ['<=', ['get', '2020'], 12544], '#ff1c1c', 
+                        '#ff0000' 
+                   ],
+               12, [
+                    'case',
+                        ['<=', ['get', '2020'], 7], '#ffffff', // 白色
+                        ['<=', ['get', '2020'], 14], '#ffe3e3', 
+                        ['<=', ['get', '2020'], 28], '#ffc6c6', 
+                        ['<=', ['get', '2020'], 56], '#ffaaaa', 
+                        ['<=', ['get', '2020'], 112], '#ff8e8e', 
+                        ['<=', ['get', '2020'], 224], '#ff7171', 
+                        ['<=', ['get', '2020'], 448], '#ff5555', 
+                        ['<=', ['get', '2020'], 896], '#ff3939', 
+                        ['<=', ['get', '2020'], 1792], '#ff1c1c', 
+                        '#ff0000' 
+                   ],
+               14, [
+                    'case',
+                        ['<=', ['get', '2020'], 1], '#ffffff', // 白色
+                        ['<=', ['get', '2020'], 2], '#ffe3e3', 
+                        ['<=', ['get', '2020'], 4], '#ffc6c6', 
+                        ['<=', ['get', '2020'], 8], '#ffaaaa', 
+                        ['<=', ['get', '2020'], 16], '#ff8e8e', 
+                        ['<=', ['get', '2020'], 32], '#ff7171', 
+                        ['<=', ['get', '2020'], 64], '#ff5555', 
+                        ['<=', ['get', '2020'], 128], '#ff3939', 
+                        ['<=', ['get', '2020'], 256], '#ff1c1c', 
+                        '#ff0000' 
+                          ]
+                   ],
+
+                    'fill-opacity': 0.5 // 塗りつぶしの透過度
+                }
+            });
+
+
+            // 外枠用のレイヤーを追加
+            map.addLayer({
+                id: 'population-outline-layer',
+                type: 'line',
+                source: 'population-source',
+                'source-layer': 'pop', // データ内のレイヤー名を指定
+                paint: {
+                    'line-color': '#c0c0c0', // 外枠の色を灰色に設定
+                    'line-width': 0.2 // 外枠の幅を１ピクセルに設定
+                }
+            });
+
+
+            map.addSource('PublicTransport-source', {
+                type: 'vector',
+                tiles: [
+                    'pmtiles://http://127.0.0.1:8080/Data/PublicTransport.pmtiles/{z}/{x}/{y}'
+                ],
+                minzoom: 4,
+                maxzoom: 10,
+                attribution: '<a href="https://dilimicroletroutes.github.io/" target="_blank">DiliMicroletRoutes</a> '
+            });
+
+
+            map.addLayer({
+                id: 'MicroletRoute-line-layer',
+                type: 'line',
+                source: 'PublicTransport-source',
+                'source-layer': 'MicroletRoute', // データ内のレイヤー名を指定
+                paint: {
+                    'line-color': '#000000',
+                    'line-width': 3
+                }
+            });
+
+
+
+
+            map.addLayer({
+                id: 'PublicTransport-points-layer',
+                type: 'circle',
+                source: 'PublicTransport-source',
+                'source-layer': 'PublicTransport', // データ内のレイヤー名を指定
+                paint: {
+                    'circle-radius': 6, // ポイントの半径
+                    'circle-color': [
+                    'match',
+                   ['get', 'amenity'], // 属性情報の 'category' プロパティを取得
+                   'ferry_terminal', '#0000FF', // 'ferry' の場合は青色
+                   '#00FF00' // デフォルトは緑色
+                   ],
+                   'circle-stroke-width': 2, // ポイントの外枠の幅
+                   'circle-stroke-color': '#000000' // ポイントの外枠の色
+                }
+            });
+
+
+            map.addSource('pm25-source', {
+                type: 'vector',
+                tiles: [
+                    'pmtiles://http://127.0.0.1:8080/Data/PM25.pmtiles/{z}/{x}/{y}'
+                ],
+                minzoom: 4,
+                maxzoom: 9,
+                attribution: '<a href="https://sites.wustl.edu/acag/datasets/surface-pm2-5//" target="_blank">Satellite-derived PM2.5 data V6.GL.02.02</a> '
+            });
+
+
+
+
+            // 外枠用のレイヤーを追加
+            map.addLayer({
+                id: 'MUNICIPIO-outline-layer',
+                type: 'line',
+                source: 'pm25-source',
+                'source-layer': 'Municipio', // データ内のレイヤー名を指定
+                paint: {
+                    'line-color': '#010066', 
+                    'line-width': 1 // 外枠の幅を１ピクセルに設定
+                },
+                layout: {
+                    'visibility': 'none' // デフォルトで非表示
+                }
+            });
+
+
+            // 外枠用のレイヤーを追加
+            map.addLayer({
+                id: 'PostuAdministrativo-outline-layer',
+                type: 'line',
+                source: 'pm25-source',
+                'source-layer': 'PostuAdministrativo', // データ内のレイヤー名を指定
+                paint: {
+                    'line-color': '#010066', 
+                    'line-width': 0.3 // 外枠の幅を１ピクセルに設定
+                },
+                layout: {
+                    'visibility': 'none' // デフォルトで非表示
+                }
+            });
+
+
+            // 外枠用のレイヤーを追加
+            map.addLayer({
+                id: 'Suco-outline-layer',
+                type: 'line',
+                source: 'pm25-source',
+                'source-layer': 'Suco', // データ内のレイヤー名を指定
+                paint: {
+                    'line-color': '#235BC8', 
+                    'line-width': 0.1 // 外枠の幅を１ピクセルに設定
+                },
+                layout: {
+                    'visibility': 'none' // デフォルトで非表示
+                }
+            });
+
+
+        });
+
+  
+        // ズームレベルを表示する要素を更新する関数
+        const updateZoomLevel = () => {
+            const zoom = map.getZoom().toFixed(2); // ズームレベルを小数点以下2桁まで表示
+            document.getElementById('zoom-level').innerText = `Zoom: ${zoom}`;
+        }
+
+        // 地図のズームイベントにリスナーを追加
+        map.on('zoom', updateZoomLevel);
+
+        // 初期ズームレベルを表示
+        updateZoomLevel();
+
+    // ポリゴンの面積を計算して表示する関数
+    const displayPolygonArea = (polygon) => {
+        const area = turf.area(polygon); // 面積を計算
+        return area;
+    };
+
+
+
+
+    map.on('click', 'population-fill-layer', e => {
+        if (e.features && e.features.length > 0) {
+            const properties = e.features[0].properties;
+            const geometry = e.features[0].geometry;
+            let propertiesStr = '';
+
+            // ポリゴンの面積を計算
+            if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
+                const area = displayPolygonArea(geometry);
+                propertiesStr += `面積: ${area.toFixed(2)} 平方メートル\n`;
+            }
+
+            // 属性情報を表示
+            for (const prop in properties) {
+                propertiesStr += `${prop}: ${properties[prop]}\n`;
+            }
+            document.querySelector('#attributes').innerText = propertiesStr;
+        }
+    });
+
+
+
+
+        map.on('click', 'PublicTransport-points-layer', e => {
+            if (e.features && e.features.length > 0) {
+                const properties = e.features[0].properties;
+                let propertiesStr = '';
+                for(const prop in properties){
+                    propertiesStr += `${prop}: ${properties[prop]}\r\n`;
+                }
+                document.querySelector('#attributes').innerText = propertiesStr;
+            }
+        });
+
+
+        map.on('click', 'MicroletRoute-line-layer', e => {
+            if (e.features && e.features.length > 0) {
+                const properties = e.features[0].properties;
+                let propertiesStr = '';
+                for(const prop in properties){
+                    propertiesStr += `${prop}: ${properties[prop]}\r\n`;
+                }
+                document.querySelector('#attributes').innerText = propertiesStr;
+            }
+        });
+
+
+
+    </script>
+</body>
+</html>
